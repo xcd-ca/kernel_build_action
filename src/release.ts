@@ -134,7 +134,9 @@ export async function cleanupOldReleases(token: string, keepCount: number): Prom
     });
 
     // Filter CI releases
-    const ciReleases = releases.filter((r) => r.tag_name.startsWith('last-ci-'));
+    const ciReleases = releases.filter((r: { tag_name: string }) =>
+      r.tag_name.startsWith('last-ci-')
+    );
 
     if (ciReleases.length > keepCount) {
       const toDelete = ciReleases.slice(keepCount);
