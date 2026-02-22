@@ -1,42 +1,71 @@
-name: Build Star Kernel (Merge Config)
+name: Build Xiaomi 11 Star Kernel
 on:
   workflow_dispatch:
 
 jobs:
-  Build-Kernel:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Source
-        uses: actions/checkout@v3
-
-      - name: Prepare Environment
+      - name: 1. 安装基础依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev libelf-dev bc bison flex libncurses5-dev
-          mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev clang lld llvm tar cpio perl python3 git zip
 
-      - name: Build Kernel
-        uses: dabao1955/kernel_build_action@main
+      - name: 2. 拉取内核源码
+        run: |
+          git clone --depth=1 -b miui-t https://github.com/tanz3/kernel_xiaomi_sm8350-miui kernel
+          
+      - name: 3. 拉取并配置编译器 (Clang r416183b1)
+        run: |
+          mkdir clang
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r416183b1.tar.gz -O clang.tar.gz
+          tar -C clang -xf clang.tar.gz
+          # 拉取 GCC 补丁
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android12-release gcc64
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android12-release gcc32
+
+      - name: 4. 核心步骤：强行合并小米 11 配置文件
+        run: |
+          cd kernel
+          # 按顺序合并：高通底座 + 小米通用 + 小米 11 专属
+          cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
+              arch/arm64/configs/vendor/xiaomi_QGKI.config \
+              arch/arm64/configs/vendor/star_QGKI.config > arch/arm64/configs/star_merged_defconfig
+          echo "CONFIG_LOCALVERSION=\"-Star-KSU-$(date +%m%d)\"" >> arch/arm64/configs/star_merged_defconfig
+
+      - name: 5. 集成 KernelSU (v0.9.5)
+        run: |
+          cd kernel
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+
+      - name: 6. 开始编译
+        run: |
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
+          make O=out ARCH=arm64 star_merged_defconfig
+          make -j$(nproc --all) O=out ARCH=arm64 \
+               CC=clang \
+               CLANG_TRIPLE=aarch64-linux-gnu- \
+               CROSS_COMPILE=aarch64-linux-android- \
+               CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+               LD=ld.lld \
+               AR=llvm-ar \
+               NM=llvm-nm \
+               OBJCOPY=llvm-objcopy \
+               OBJDUMP=llvm-objdump \
+               STRIP=llvm-strip
+
+      - name: 7. 打包 AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3
+          cp kernel/out/arch/arm64/boot/Image AnyKernel3/
+          cd AnyKernel3
+          # 修改 AnyKernel3 配置以匹配 star
+          sed -i 's/device.name1=maguro/device.name1=star/' anykernel.sh
+          zip -r ../Star-Kernel-KSU.zip *
+
+      - name: 8. 上传成品
+        uses: actions/upload-artifact@v4
         with:
-          kernel-url: https://github.com/tanz3/kernel_xiaomi_sm8350-miui
-          kernel-dir: msm-5.4
-          kernel-branch: miui-t
-          
-          # 【核心黑科技】在这里直接注入合并命令
-          # 我们在生成配置前，强行把三个碎片合并成一个名为 star_defconfig 的文件
-          config: star_defconfig
-          custom-commands: |
-            cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
-                arch/arm64/configs/vendor/xiaomi_QGKI.config \
-                arch/arm64/configs/vendor/star_QGKI.config > arch/arm64/configs/star_defconfig
-          
-          arch: arm64
-          android-version: 12
-          aosp-gcc: true
-          aosp-clang: true
-          aosp-clang-version: r416183b1
-          
-          ksu: true
-          ksu-version: main
-          disable-lto: true
-          anykernel3: true
+          name: Star-Kernel-KSU
+          path: Star-Kernel-KSU.zip
