@@ -1,4 +1,4 @@
-# 针对小米 11 (Star) MIUI 14 适配，采用最稳的 AOSP 11 编译器
+# 针对小米 11 (Star) MIUI 14 适配，修正为骁龙 888 平台通用 GKI 配置
 name: Build Kernel
 on:
   workflow_dispatch:
@@ -15,28 +15,25 @@ jobs:
       - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
         with:
-          # 1. 源码：针对 MIUI 优化的 SM8350 仓库
+          # 1. 源码：小米 11 MIUI 专用仓库
           kernel-url: https://github.com/tanz3/kernel_xiaomi_sm8350-miui
           kernel-dir: msm-5.4
-          
-          # 2. 分支：miui-t 代表 MIUI Android 13 (Tiramisu)
           kernel-branch: miui-t
           
-          # 3. 配置文件：小米 11 官方 GKI 架构配置
-          config: vendor/star-qgki_defconfig
+          # 2. 配置文件：根据你提供的列表，这是唯一正确的 SM8350 MIUI 配置文件
+          # 注意：是连字号 - 而不是下划线 _
+          config: vendor/lahaina-qgki_defconfig
           
           arch: arm64
           aosp-gcc: true
           aosp-clang: true
           
-          # 4. 编译器：按你说的，降回到最稳的 Android 11 版本
+          # 3. 编译器：严格遵守你的建议，降回 Android 11 版本防止报错
           android-version: 11
           aosp-clang-version: r383902
           
-          # 5. KernelSU：集成最新主分支代码
+          # 4. 功能开关
           ksu: true
           ksu-version: main
-          
-          # 6. 其他设置
           disable-lto: true
           anykernel3: true
