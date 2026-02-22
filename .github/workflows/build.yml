@@ -24,7 +24,7 @@ jobs:
           # 核心修改点 4：小米 11 Ultra (star) 的专用配置文件
           config: vendor/star_user_defconfig
           arch: arm64
-          aosp-gcc: true
+          aosp-gcc: false
           aosp-clang: true
           ksu: true
           ksu-version: main
