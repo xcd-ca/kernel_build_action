@@ -15,16 +15,22 @@ jobs:
       - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
         with:
-          kernel-url: https://github.com/AcmeUI-Devices/android_kernel_xiaomi_cas
-          kernel-dir: msm-4.19
-          kernel-branch: taffy
-          config: cas_defconfig
+          # 核心修改点 1：使用最适合小米 11 系列的社区源码
+          kernel-url: https://github.com/pa-markakash/kernel_xiaomi_sm8350
+          # 核心修改点 2：对应你的 5.4 内核
+          kernel-dir: msm-5.4
+          # 核心修改点 3：安卓 13 分支 (MIUI 14)
+          kernel-branch: 13
+          # 核心修改点 4：小米 11 Ultra (star) 的专用配置文件
+          config: vendor/star_user_defconfig
           arch: arm64
           aosp-gcc: true
           aosp-clang: true
           ksu: true
           ksu-version: main
-          android-version: 12
-          aosp-clang-version: r383902
+          # 核心修改点 5：适配 MIUI 14 的安卓版本
+          android-version: 13
+          # 核心修改点 6：使用更高版本的编译链，避免 5.4 内核报错
+          aosp-clang-version: r450784d
           disable-lto: true
           anykernel3: true
