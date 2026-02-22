@@ -24,12 +24,12 @@ jobs:
           # 核心修改点 4：小米 11 Ultra (star) 的专用配置文件
           config: vendor/star_user_defconfig
           arch: arm64
-          aosp-gcc: false
+          aosp-gcc: true
           aosp-clang: true
           ksu: true
           ksu-version: main
           # 核心修改点 5：适配 MIUI 14 的安卓版本
-          android-version: 13
+          android-version: 12
           # 核心修改点 6：使用更高版本的编译链，避免 5.4 内核报错
           aosp-clang-version: r450784d
           disable-lto: true
