@@ -17,7 +17,7 @@ jobs:
         with:
           kernel-url: https://github.com/pa-markakash/kernel_xiaomi_sm8350
           kernel-dir: msm-5.4
-          kernel-branch: 13
+          kernel-branch: twelve
           config: vendor/star_user_defconfig
           arch: arm64
           aosp-gcc: true
