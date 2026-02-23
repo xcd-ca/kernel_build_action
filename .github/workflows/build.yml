@@ -76,7 +76,7 @@ jobs:
                HOSTCFLAGS="-fuse-ld=lld" \
                HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu"
 
-      - name: 7. 检查编译结果并打包 AnyKernel3 (终极适配版)
+      - name: 7. 检查编译结果并打包 AnyKernel3 (终极无敌版)
         run: |
           if [ -f kernel/out/arch/arm64/boot/Image ]; then
             echo "找到内核，准备打包..."
@@ -90,11 +90,12 @@ jobs:
             sed -i 's/device.name1=maguro/device.name1=star/' anykernel.sh
             sed -i 's/device.name2=panda/device.name2=mars/' anykernel.sh
             
-            # 2. 【核心修复】修改为高通骁龙的通用 Boot 分区路径
-            sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;|block=/dev/block/bootdevice/by-name/boot;|' anykernel.sh
+            # 2. 【核弹级修复】不管原文件写了啥，直接把整行替换掉！
+            sed -i 's/^block=.*/block=\/dev\/block\/bootdevice\/by-name\/boot;/' anykernel.sh
+            sed -i 's/^is_slot_device=.*/is_slot_device=1;/' anykernel.sh
             
-            # 3. 【核心修复】开启 A/B 动态分区支持 (小米 11 必备)
-            sed -i 's/is_slot_device=0;/is_slot_device=1;/' anykernel.sh
+            # 3. 避免 ramdisk 压缩格式报错（加个双保险）
+            sed -i 's/^ramdisk_compression=.*/ramdisk_compression=auto;/' anykernel.sh
             
             # 打包成纯净的 Zip 文件
             zip -r9 ../Star-Kernel-KSU-$(date +%Y%m%d).zip ./*
