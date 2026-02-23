@@ -4,7 +4,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: 1. 安装基础依赖
         run: |
@@ -44,16 +44,21 @@ jobs:
           cd kernel
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
-      - name: 6. 开始正式编译
+      - name: 6. 开始正式编译 (带补丁版)
         run: |
           cd kernel
           # 设置环境变量
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
+          # 【补丁核心】强行让内核使用系统自带的 /usr/bin/ld 替代工具链里那个过时的 ld
+          # 这样它就能识别 Ubuntu 24.04 的库文件格式了
+          ln -sf /usr/bin/ld.lld $GITHUB_WORKSPACE/clang/bin/ld.lld
+          ln -sf /usr/bin/ld.bfd $GITHUB_WORKSPACE/clang/bin/ld
+          
           # 生成 .config 文件
           make O=out ARCH=arm64 star_merged_defconfig
           
-          # 执行编译
+          # 执行编译，增加一些兼容性参数
           make -j$(nproc --all) O=out ARCH=arm64 \
                CC=clang \
                CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -65,7 +70,8 @@ jobs:
                OBJCOPY=llvm-objcopy \
                OBJDUMP=llvm-objdump \
                STRIP=llvm-strip \
-               CONFIG_DEBUG_SECTION_MISMATCH=y
+               HOSTCFLAGS="-fuse-ld=lld" \
+               HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu"
 
       - name: 7. 检查编译结果并打包 AnyKernel3
         run: |
