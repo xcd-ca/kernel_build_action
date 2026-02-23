@@ -76,18 +76,30 @@ jobs:
                HOSTCFLAGS="-fuse-ld=lld" \
                HOSTLDFLAGS="-L/usr/lib/x86_64-linux-gnu"
 
-      - name: 7. 检查编译结果并打包 AnyKernel3
+      - name: 7. 检查编译结果并打包 AnyKernel3 (修复结构版)
         run: |
+          # 检查 Image 是否真的存在
           if [ -f kernel/out/arch/arm64/boot/Image ]; then
+            echo "找到编译后的内核镜像，准备打包..."
+            # 克隆模板
             git clone --depth=1 https://github.com/osm0sis/AnyKernel3
+            # 删除模板里的 .git 文件夹，减小体积
+            rm -rf AnyKernel3/.git
+            # 复制内核镜像到模板目录
             cp kernel/out/arch/arm64/boot/Image AnyKernel3/
+            
+            # 进入目录操作
             cd AnyKernel3
             # 适配小米 11 (star)
             sed -i 's/device.name1=maguro/device.name1=star/' anykernel.sh
             sed -i 's/device.name2=panda/device.name2=mars/' anykernel.sh
-            zip -r ../Star-Kernel-KSU-$(date +%Y%m%d).zip *
+            
+            # 【关键：使用 -j 参数或者在目录内打包】
+            # 确保 zip 内部直接就是文件，没有父文件夹
+            zip -r9 ../Star-Kernel-KSU-$(date +%Y%m%d).zip ./*
+            cd ..
           else
-            echo "错误：编译未生成 Image 文件，请检查编译日志。"
+            echo "错误：内核镜像生成失败，请回看第 6 步的编译日志！"
             exit 1
           fi
 
