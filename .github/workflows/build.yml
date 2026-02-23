@@ -11,7 +11,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev clang lld llvm tar cpio perl python3 git zip wget
 
-      - name: 2. 拉取内核源码
+      - name: 2. 拉取内核源码 (Xiaomi 11 Star)
         run: |
           git clone --depth=1 -b miui-t https://github.com/tanz3/kernel_xiaomi_sm8350-miui kernel
           
@@ -21,47 +21,64 @@ jobs:
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android12-release gcc64
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android12-release gcc32
 
-      - name: 4. 集成 SukiSU Ultra (Susfs 补丁)
+      - name: 4. 集成 KernelSU 和 Susfs (SukiSU Ultra 核心)
         run: |
           cd kernel
-          # 1. 首先集成基础 KernelSU
+          # 1. 集成 KernelSU v0.9.5
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 2. 下载并应用 Susfs 补丁 (针对 5.4 内核)
-          git clone https://gitlab.com/simonpunk/susfs4linux.git
+          # 2. 拉取 Susfs 补丁 (改用 GitHub 镜像源避免 GitLab 128 错误)
+          git clone --depth=1 https://github.com/TheRealVun/susfs4linux.git
+          
+          # 3. 复制 Susfs 核心文件到内核源码
           cp susfs4linux/5.4/arch/arm64/include/asm/susfs.h arch/arm64/include/asm/
           cp susfs4linux/5.4/fs/susfs.c fs/
           
-          # 执行必要的源码打补丁 (这里使用强力替换，确保补丁生效)
+          # 4. 执行文件 Hooks 补丁 (SukiSU 工作必须)
+          # 注意：这里使用基本的注入，确保 Susfs 参与编译
           sed -i '/obj-y += devpts.o/a obj-y += susfs.o' fs/Makefile
-          # 注意：为了 SukiSU Ultra 正常工作，建议手动检查 fs/open.c 等文件的 hook，但基础补丁先按此处理
+          
+          # 5. 集成 Susfs 到 KernelSU (让 KSU 支持 Susfs 指令)
+          # 获取 KernelSU-Next 风格的 Susfs 补丁（这是 SukiSU Ultra 的核心）
+          wget https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/susfs_handler.inc -O KernelSU/kernel/susfs_handler.inc
+          # 注入 Susfs 检查逻辑到 KSU
+          sed -i '/#include "selinux.h"/a #include "susfs_handler.inc"' KernelSU/kernel/ksu.c
 
-      - name: 5. 核心步骤：配置文件合并 (开启 Susfs 开关)
+      - name: 5. 合并配置并开启所有开关
         run: |
           cd kernel
           cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
               arch/arm64/configs/vendor/xiaomi_QGKI.config \
               arch/arm64/configs/vendor/star_QGKI.config > arch/arm64/configs/star_merged_defconfig
           
-          # 基础修复
+          # 注入自定义名称
           echo "CONFIG_LOCALVERSION=\"-Star-SukiSU-$(date +%m%d)\"" >> arch/arm64/configs/star_merged_defconfig
-          echo "CONFIG_LTO_NONE=y" >> arch/arm64/configs/star_merged_defconfig
-          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> arch/arm64/configs/star_merged_defconfig
           
-          # 【重点】开启 SukiSU Ultra / Susfs 核心开关
+          # 开启内核底层支持
+          echo "CONFIG_KPROBES=y" >> arch/arm64/configs/star_merged_defconfig
+          echo "CONFIG_HAVE_KPROBES=y" >> arch/arm64/configs/star_merged_defconfig
+          echo "CONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/star_merged_defconfig
+          
+          # 开启 SukiSU / Susfs 关键开关
           echo "CONFIG_KSU=y" >> arch/arm64/configs/star_merged_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/star_merged_defconfig
           echo "CONFIG_SUSFS_ALLOW_KSU_VERSION_CHECK=y" >> arch/arm64/configs/star_merged_defconfig
+          
+          # 修复堆栈报错并优化编译
+          echo "CONFIG_LTO_NONE=y" >> arch/arm64/configs/star_merged_defconfig
+          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> arch/arm64/configs/star_merged_defconfig
 
-      - name: 6. 正式编译 (内核 + DTBO)
+      - name: 6. 正式编译 (Image + DTBO)
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
-          # 生成 .config
+          # 强制链接 Ubuntu 的 LLD 修复环境问题
+          ln -sf /usr/bin/ld.lld $GITHUB_WORKSPACE/clang/bin/ld.lld
+          
           make O=out ARCH=arm64 star_merged_defconfig
           
-          # 【核心】同时编译 Image 和 dtbo.img 以修复震动
+          # 核心编译：Image 和 dtbo.img 缺一不可
           make -j$(nproc --all) O=out ARCH=arm64 \
                CC=clang \
                CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -75,21 +92,14 @@ jobs:
                STRIP=llvm-strip \
                Image dtbo.img
 
-      - name: 7. 整理 PC 刷机产出
+      - name: 7. 整理 PC 刷机文件
         run: |
           mkdir -p output
           cp kernel/out/arch/arm64/boot/Image output/
           cp kernel/out/arch/arm64/boot/dtbo.img output/
-          # 顺便把那个该死的 AK3 也打包一份备用，但我们主要用上面的 raw 文件
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AK3
-          cp kernel/out/arch/arm64/boot/Image AK3/
-          cp kernel/out/arch/arm64/boot/dtbo.img AK3/
-          cd AK3
-          sed -i 's/^block=.*/block=\/dev\/block\/by-name\/boot;/' anykernel.sh
-          sed -i 's/^is_slot_device=.*/is_slot_device=1;/' anykernel.sh
-          zip -r9 ../output/Star-Kernel-PC-Flash.zip ./*
+          echo "PC 刷机文件已就绪。Image 用于替换 boot.img 里的内核，dtbo.img 用于修复震动。" > output/使用说明.txt
 
-      - name: 8. 上传成品 (Image + DTBO)
+      - name: 8. 上传成品
         uses: actions/upload-artifact@v4
         with:
           name: Xiaomi-11-Star-SukiSU-PC-Files
