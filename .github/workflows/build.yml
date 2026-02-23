@@ -27,21 +27,25 @@ jobs:
           # 1. 集成 KernelSU v0.9.5
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          # 2. 拉取 Susfs 补丁 (改用 GitHub 镜像源避免 GitLab 128 错误)
-          git clone --depth=1 https://github.com/TheRealVun/susfs4linux.git
+          # 2. 【核心修复】不使用 git clone，直接下载 SusFS 核心文件 (尝试多个镜像源)
+          mkdir -p arch/arm64/include/asm/
+          wget https://raw.githubusercontent.com/sidex15/susfs4linux/main/5.4/arch/arm64/include/asm/susfs.h -O arch/arm64/include/asm/susfs.h || \
+          wget https://raw.githubusercontent.com/TheRealVun/susfs4linux/main/5.4/arch/arm64/include/asm/susfs.h -O arch/arm64/include/asm/susfs.h
           
-          # 3. 复制 Susfs 核心文件到内核源码
-          cp susfs4linux/5.4/arch/arm64/include/asm/susfs.h arch/arm64/include/asm/
-          cp susfs4linux/5.4/fs/susfs.c fs/
+          wget https://raw.githubusercontent.com/sidex15/susfs4linux/main/5.4/fs/susfs.c -O fs/susfs.c || \
+          wget https://raw.githubusercontent.com/TheRealVun/susfs4linux/main/5.4/fs/susfs.c -O fs/susfs.c
           
-          # 4. 执行文件 Hooks 补丁 (SukiSU 工作必须)
-          # 注意：这里使用基本的注入，确保 Susfs 参与编译
+          # 3. 注入 Susfs 到内核编译系统
           sed -i '/obj-y += devpts.o/a obj-y += susfs.o' fs/Makefile
           
-          # 5. 集成 Susfs 到 KernelSU (让 KSU 支持 Susfs 指令)
-          # 获取 KernelSU-Next 风格的 Susfs 补丁（这是 SukiSU Ultra 的核心）
+          # 4. 【关键】为 SukiSU Ultra 注入内核 Hook (手动修改内核源码)
+          # 在 fs/open.c 中注入 Hook
+          sed -i '/include <linux\/fs_struct.h>/a #include <asm/susfs.h>' fs/open.c
+          # 在 fs/stat.c 中注入 Hook
+          sed -i '/include <linux\/syscalls.h>/a #include <asm/susfs.h>' fs/stat.c
+
+          # 5. 集成 Susfs 到 KernelSU 内部 (SukiSU Handler)
           wget https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/susfs_handler.inc -O KernelSU/kernel/susfs_handler.inc
-          # 注入 Susfs 检查逻辑到 KSU
           sed -i '/#include "selinux.h"/a #include "susfs_handler.inc"' KernelSU/kernel/ksu.c
 
       - name: 5. 合并配置并开启所有开关
