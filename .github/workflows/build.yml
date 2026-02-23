@@ -16,13 +16,12 @@ jobs:
           # 深度设为 1 节省空间和时间
           git clone --depth=1 -b miui-t https://github.com/tanz3/kernel_xiaomi_sm8350-miui kernel
           
-      - name: 3. 拉取编译器 (使用稳定的 GitHub 镜像)
+      - name: 3. 拉取编译器 (使用顶级的 Proton Clang)
         run: |
-          # 使用社区维护的 AOSP Clang 镜像，避免 Google Source 的 400 错误
-          mkdir clang
-          git clone --depth=1 https://github.com/nclib/clang-r416183b1 clang
+          # 直接从 GitHub 极速拉取 Proton Clang，告别网络和权限报错
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
           
-          # 拉取 GCC 交叉编译器
+          # 拉取 GCC 交叉编译器 (Google 源的这两个没问题，继续保留)
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android12-release gcc64
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android12-release gcc32
 
