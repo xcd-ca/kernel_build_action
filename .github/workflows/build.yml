@@ -28,16 +28,19 @@ jobs:
       - name: 4. 核心步骤：强行合并小米 11 配置文件
         run: |
           cd kernel
-          # 严格按照：底座 -> 小米通用 -> 11专属 顺序合并
+          # 1. 基础合并
           cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
               arch/arm64/configs/vendor/xiaomi_QGKI.config \
               arch/arm64/configs/vendor/star_QGKI.config > arch/arm64/configs/star_merged_defconfig
           
-          # 注入版本号标识，方便在“关于手机”里查看
+          # 2. 注入个性化和修复参数
           echo "CONFIG_LOCALVERSION=\"-Star-KSU-$(date +%m%d)\"" >> arch/arm64/configs/star_merged_defconfig
-          # 强制关闭 LTO 以提高编译成功率（LTO 非常耗内存，容易导致 Actions 崩溃）
           echo "CONFIG_LTO_NONE=y" >> arch/arm64/configs/star_merged_defconfig
-          echo "# CONFIG_LTO_CLANG is not set" >> arch/arm64/configs/star_merged_defconfig
+          
+          # 【重点：修复 __stack_chk_guard 报错】
+          echo "CONFIG_STACKPROTECTOR=n" >> arch/arm64/configs/star_merged_defconfig
+          echo "CONFIG_STACKPROTECTOR_STRONG=n" >> arch/arm64/configs/star_merged_defconfig
+          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> arch/arm64/configs/star_merged_defconfig
 
       - name: 5. 集成 KernelSU (v0.9.5)
         run: |
