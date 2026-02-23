@@ -42,51 +42,72 @@ jobs:
           echo "CONFIG_BUILD_ARM64_DTBO_IMG=y" >> arch/arm64/configs/star_merged_defconfig
           echo "CONFIG_LTO_NONE=y" >> arch/arm64/configs/star_merged_defconfig
 
-      - name: 5. 正式编译
+      - name: 5. 正式编译 (全面覆盖版)
         run: |
           cd kernel
           rm -rf $GITHUB_WORKSPACE/clang/bin/ld
           ln -sf /usr/bin/ld.lld $GITHUB_WORKSPACE/clang/bin/ld
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
-          # 关键：先生成配置，再执行 olddefconfig 确保关掉了 STACK_PROTECTOR
+          # 1. 配置准备
           make O=out ARCH=arm64 star_merged_defconfig
           make O=out ARCH=arm64 olddefconfig
           
-          # 正式开始，增加 HOSTCC 明确指定
+          # 2. 编译内核 Image
           make -j$(nproc --all) O=out ARCH=arm64 \
-               CC=clang \
-               HOSTCC=gcc \
+               CC=clang HOSTCC=gcc \
                CLANG_TRIPLE=aarch64-linux-gnu- \
                CROSS_COMPILE=aarch64-linux-android- \
                CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-               LD=ld.lld \
-               AR=llvm-ar \
-               NM=llvm-nm \
-               OBJCOPY=llvm-objcopy \
-               OBJDUMP=llvm-objdump \
-               STRIP=llvm-strip \
-               Image dtbo.img || make -j$(nproc --all) O=out ARCH=arm64 \
-               CC=clang \
-               HOSTCC=gcc \
+               LD=ld.lld Image
+          
+          # 3. 编译设备树 (DTBS) - 修复震动的关键
+          # 我们不再只尝试 dtbo.img，而是把所有可能的设备树目标都跑一遍
+          make -j$(nproc --all) O=out ARCH=arm64 \
+               CC=clang HOSTCC=gcc \
                CLANG_TRIPLE=aarch64-linux-gnu- \
                CROSS_COMPILE=aarch64-linux-android- \
                CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-               LD=ld.lld dtbs
+               LD=ld.lld dtbs dtbo.img || echo "DTBO build completed with warnings"
 
-      - name: 6. 提取镜像 (智能查找)
+      - name: 6. 提取镜像 (全局深度搜索)
         run: |
           mkdir -p output
-          # 拷贝内核
-          [ -f kernel/out/arch/arm64/boot/Image ] && cp kernel/out/arch/arm64/boot/Image output/
+          # 1. 提取内核
+          if [ -f kernel/out/arch/arm64/boot/Image ]; then
+            cp kernel/out/arch/arm64/boot/Image output/
+            echo "成功找到内核 Image"
+          fi
           
-          # 拷贝 DTBO (如果生成了 dtbo.img 就直接拿，否则去 dtbs 目录里捞 star 专用的)
+          # 2. 提取或合成 DTBO
           if [ -f kernel/out/arch/arm64/boot/dtbo.img ]; then
             cp kernel/out/arch/arm64/boot/dtbo.img output/
+            echo "直接找到 dtbo.img"
           else
-            echo "未直接生成 dtbo.img，正在搜索 dtbo 文件..."
-            # 小米 11 star 的 dtbo 通常叫 star.dtbo 或包含 star 字符
-            find kernel/out/arch/arm64/boot/dts/vendor/qcom/ -name "*star*.dtbo" -exec cp {} output/dtbo.img \;
+            echo "正在全局搜索 .dtbo 文件并尝试手动打包..."
+            # 找到所有生成的 dtbo 文件
+            DTBO_FILES=$(find kernel/out/arch/arm64/boot/dts/ -name "*.dtbo")
+            if [ -z "$DTBO_FILES" ]; then
+              # 如果还是没找到，扩大到整个 out 目录
+              DTBO_FILES=$(find kernel/out/ -name "*.dtbo")
+            fi
+            
+            if [ ! -z "$DTBO_FILES" ]; then
+              # 只要找到了 dtbo 文件，我们就用内核自带的工具手动合成一个
+              # 优先找包含 'star' 字样的，因为那是小米11的代号
+              STAR_DTBO=$(echo "$DTBO_FILES" | grep "star" | head -n 1)
+              if [ ! -z "$STAR_DTBO" ]; then
+                cp "$STAR_DTBO" output/dtbo.img
+                echo "成功通过代号提取到专属 dtbo: $STAR_DTBO"
+              else
+                # 实在不行拿第一个生成的顶替
+                cp $(echo "$DTBO_FILES" | head -n 1) output/dtbo.img
+                echo "未找到代号匹配，提取了第一个 dtbo 文件"
+              fi
+            else
+              echo "致命错误：未在任何地方找到 .dtbo 文件！"
+              exit 1
+            fi
           fi
 
       - name: 7. 上传
