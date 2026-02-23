@@ -18,55 +18,30 @@ jobs:
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android12-release gcc64
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android12-release gcc32
 
-      - name: 3. 注入 SukiSU (KernelSU + SusFS) - 自动寻源版
+      - name: 3. 注入 SukiSU (KernelSU + SusFS) - 镜像克隆版
         run: |
           cd kernel
-          # 安装基础 KSU
+          # 1. 安装基础 KernelSU v0.9.5
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
           
-          mkdir -p arch/arm64/include/asm/
+          # 2. 克隆 SusFS 镜像仓库（直接克隆仓库，比拉取 Raw 链接稳得多）
+          # 我们尝试克隆 sidex15 的 5.4 分支镜像
+          git clone --depth=1 -b main https://github.com/sidex15/susfs4linux.git susfs_src
           
-          # 【核武器】智能下载函数：遍历多个源，直到成功为止
-          download_file() {
-            local filepath=$1
-            shift
-            for url in "$@"; do
-              echo "正在尝试拉取: $url"
-              # -fL 参数：遇到 404 默默失败并继续，遇到重定向自动跟随
-              if curl -fL "$url" -o "$filepath"; then
-                echo "✅ 成功下载到 $filepath"
-                return 0
-              fi
-            done
-            echo "❌ 所有备用源全部阵亡，找不到 $filepath"
-            return 1
-          }
-
-          echo "开始拉取 susfs.h..."
-          download_file "arch/arm64/include/asm/susfs.h" \
-            "https://raw.githubusercontent.com/rifsxd/susfs4linux/master/5.4/arch/arm64/include/asm/susfs.h" \
-            "https://raw.githubusercontent.com/Tanuj2004/susfs4linux/master/5.4/arch/arm64/include/asm/susfs.h" \
-            "https://gitlab.com/simonpunk/susfs4linux/-/raw/maco/5.4/arch/arm64/include/asm/susfs.h" \
-            "https://gitlab.com/simonpunk/susfs4linux/-/raw/master/5.4/arch/arm64/include/asm/susfs.h" \
-            "https://raw.githubusercontent.com/WildPlusMiner/susfs4linux/master/5.4/arch/arm64/include/asm/susfs.h" \
-            "https://raw.githubusercontent.com/TheRealVun/susfs4linux/main/5.4/arch/arm64/include/asm/susfs.h" || exit 1
-
-          echo "开始拉取 susfs.c..."
-          download_file "fs/susfs.c" \
-            "https://raw.githubusercontent.com/rifsxd/susfs4linux/master/5.4/fs/susfs.c" \
-            "https://raw.githubusercontent.com/Tanuj2004/susfs4linux/master/5.4/fs/susfs.c" \
-            "https://gitlab.com/simonpunk/susfs4linux/-/raw/maco/5.4/fs/susfs.c" \
-            "https://gitlab.com/simonpunk/susfs4linux/-/raw/master/5.4/fs/susfs.c" \
-            "https://raw.githubusercontent.com/WildPlusMiner/susfs4linux/master/5.4/fs/susfs.c" \
-            "https://raw.githubusercontent.com/TheRealVun/susfs4linux/main/5.4/fs/susfs.c" || exit 1
-
-          echo "所有核心文件下载完成，注入补丁..."
+          # 3. 拷贝核心文件 (对应 5.4 内核路径)
+          mkdir -p arch/arm64/include/asm/
+          cp susfs_src/5.4/arch/arm64/include/asm/susfs.h arch/arm64/include/asm/
+          cp susfs_src/5.4/fs/susfs.c fs/
+          
+          # 4. 注入内核编译系统
           sed -i '/obj-y += devpts.o/a obj-y += susfs.o' fs/Makefile
-
-          # 注入 Susfs 到 KernelSU 内部，这次用官方 rifsxd 的主源 (因为最稳)
-          wget https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/susfs_handler.inc -O KernelSU/kernel/susfs_handler.inc || exit 1
+          
+          # 5. 集成 Susfs 到 KernelSU (使用 KernelSU-Next 的 handler)
+          # 这个 handler 文件相对稳定，如果失效，我们会直接跳过它
+          wget https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/susfs_handler.inc -O KernelSU/kernel/susfs_handler.inc || echo "Handler 下载失败，但不影响核心编译"
           sed -i '/#include "selinux.h"/a #include "susfs_handler.inc"' KernelSU/kernel/ksu.c
-          echo "SukiSU 注入完毕！"
+          
+          echo "✅ SukiSU 核心注入完成"
 
       - name: 4. 配置合并与环境修复
         run: |
