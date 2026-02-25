@@ -50,29 +50,45 @@ jobs:
             echo "CONFIG_STACKPROTECTOR_STRONG=n"
           } >> arch/arm64/configs/star_merged_defconfig
 
-      - name: 5. 编译 Image 与 DTBO (震动参数同步)
+      - name: 5. 编译内核 (解决链接器冲突 & 锁死版本)
         run: |
           cd kernel
+          # --- 关键修复：移除工具链中会引起冲突的旧版链接器 ---
+          # 这样系统在编译宿主工具时会使用 Ubuntu 自带的 ld，不会再报 libc 错误
+          rm -f $GITHUB_WORKSPACE/clang/bin/ld
+          rm -f $GITHUB_WORKSPACE/clang/bin/ld.lld
+          rm -f $GITHUB_WORKSPACE/clang/bin/lld
+          
+          # 设置环境变量，确保能找到编译器
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
+          # 1. 生成基础配置
           make O=out ARCH=arm64 star_merged_defconfig
           
-          # 强制同步配置
+          # 2. 确保 SukiSU 宏开启
           if ! grep -q "CONFIG_SUKI=y" out/.config; then
             echo "CONFIG_SUKI=y" >> out/.config
           fi
           
+          # 3. 应用并清理配置
           make O=out ARCH=arm64 olddefconfig
 
-          # 编译 Image 和 dtbo.img
-          # 马达的调教曲线在 dtbo.img 里，必须和内核同步刷入！
+          # 4. 正式开始编译
+          # 我们在命令里直接指定 LD=ld.lld (系统自带的高级版本)
           make -j$(nproc --all) O=out ARCH=arm64 \
-               CC=clang HOSTCC=gcc \
+               CC=clang \
+               HOSTCC=gcc \
+               HOSTCXX=g++ \
+               LD=ld.lld \
+               AR=llvm-ar \
+               NM=llvm-nm \
+               OBJCOPY=llvm-objcopy \
+               OBJDUMP=llvm-objdump \
+               STRIP=llvm-strip \
                KCFLAGS="-fno-stack-protector" \
                CLANG_TRIPLE=aarch64-linux-gnu- \
                CROSS_COMPILE=aarch64-linux-android- \
                CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-               LD=ld.lld \
                KBUILD_BUILD_USER="Xiaomi" \
                KBUILD_BUILD_HOST="Official" \
                LOCALVERSION="-qgki-gbb70cde46897" \
