@@ -35,15 +35,18 @@ jobs:
           
           # 2. 【新增】修复 5.4 内核 seccomp.filter_count 缺失报错
           echo "[+] 正在屏蔽缺失的 seccomp.filter_count 引用..."
-          # 针对 app_profile.c 中的 filter_count 进行注释处理
           find -L drivers/kernelsu -type f -name "app_profile.c" -exec sed -i 's/atomic_set(&.*seccomp.filter_count, 0);/\/\/ &/g' {} + || true
 
-          # 3. 锁定内核版本为 233 (草莓味震动身份证)
+          # 3. 【全新修复】解决 5.4 找不到 linux/pgtable.h 的致命错误
+          echo "[+] 正在修正 pgtable 头文件路径..."
+          find -L drivers/kernelsu -type f -name "sucompat.c" -exec sed -i 's/<linux\/pgtable\.h>/<asm\/pgtable\.h>/g' {} + || true
+
+          # 4. 锁定内核版本为 233 (草莓味震动身份证)
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 233/' Makefile
           echo "echo \"\"" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
 
-          # 4. 彻底清理并合并配置
+          # 5. 彻底清理并合并配置
           sed -i '/CONFIG_LOCALVERSION/d' arch/arm64/configs/vendor/xiaomi_QGKI.config
           
           cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
