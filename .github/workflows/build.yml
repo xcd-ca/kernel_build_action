@@ -18,30 +18,32 @@ jobs:
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android12-release gcc64
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android12-release gcc32
 
-      - name: 3. 集成 SukiSU (验证链接版)
+      - name: 3. 集成 SukiSU (修复分支参数)
         run: |
           cd kernel
-          # 使用 verified 链接，并增加 -f 参数确保失败时立即报错，不继续跑瞎活
-          curl -LSs -f "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
+          # 不再传递 nongki，直接运行脚本
+          curl -LSs -f "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash
           echo "✅ SukiSU 代码集成成功！"
 
-      - name: 4. 强制内核身份证与 ABI 对齐 (找回草莓味)
+      - name: 4. 外科手术修复 & 身份证锁定 (找回草莓味)
         run: |
           cd kernel
-          # 1. 强行修改源码主版本号：从 278 降回 233
+          # 1. 【核心修复】解决 TWA_RESUME 报错，5.4 内核需替换为 TWA_SIGNAL
+          # 这步不修，编译永远过不去
+          find drivers/kernelsu -type f -name "*.c" -exec sed -i 's/TWA_RESUME/TWA_SIGNAL/g' {} +
+          
+          # 2. 强行锁定内核版本为 233
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 233/' Makefile
           
-          # 2. 彻底移除所有 Git 自动生成的后缀（防止产生 + 号或 dirty 标记）
-          # 这步是让震动驱动“承认”你的关键
+          # 3. 彻底抹除版本后缀（防止 + 号破坏震动身份证）
           echo "echo \"\"" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
 
-          # 3. 准备合并配置
+          # 4. 强制注入配置
           cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
               arch/arm64/configs/vendor/xiaomi_QGKI.config \
               arch/arm64/configs/vendor/star_QGKI.config > arch/arm64/configs/star_merged_defconfig
-
-          # 4. 强行锁定 SukiSU 开启标志和官方后缀
+          
           {
             echo "CONFIG_SUKI=y"
             echo "CONFIG_LOCALVERSION=\"-qgki-gbb70cde46897\""
@@ -50,35 +52,22 @@ jobs:
             echo "CONFIG_STACKPROTECTOR_STRONG=n"
           } >> arch/arm64/configs/star_merged_defconfig
 
-      - name: 5. 最终攻坚：编译 Image (精准捕获错误)
+      - name: 5. 纯净编译 (Image + DTBS)
         run: |
           cd kernel
-          # 1. 再次确认环境隔离
-          rm -f $GITHUB_WORKSPACE/clang/bin/ld
-          rm -f $GITHUB_WORKSPACE/clang/bin/ld.lld
-          rm -f $GITHUB_WORKSPACE/clang/bin/lld
+          # 环境清理
+          rm -f $GITHUB_WORKSPACE/clang/bin/ld*
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
-          # 2. 强制回车生成配置
+          # 强制回车刷新配置
           make O=out ARCH=arm64 star_merged_defconfig
           yes "" | make O=out ARCH=arm64 olddefconfig
           
-          # 3. 强制注入 SukiSU 标志（防止丢失）
-          sed -i 's/CONFIG_SUKI=n/CONFIG_SUKI=y/g' out/.config || echo "CONFIG_SUKI=y" >> out/.config
-          
-          # 4. 开始编译 Image
-          # 注意：这次我们先不编 dtbo，只编 Image，看能不能过
-          # 如果这里报错，请翻上去找带有 "error:" 的红字
+          # 正式编译
           make -j$(nproc --all) O=out ARCH=arm64 \
-               CC=clang \
-               HOSTCC=gcc \
-               HOSTCXX=g++ \
-               LD=ld.lld \
-               AR=llvm-ar \
-               NM=llvm-nm \
-               OBJCOPY=llvm-objcopy \
-               OBJDUMP=llvm-objdump \
-               STRIP=llvm-strip \
+               CC=clang HOSTCC=gcc HOSTCXX=g++ \
+               LD=ld.lld AR=llvm-ar NM=llvm-nm \
+               OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
                KCFLAGS="-fno-stack-protector" \
                CLANG_TRIPLE=aarch64-linux-gnu- \
                CROSS_COMPILE=aarch64-linux-android- \
@@ -86,17 +75,7 @@ jobs:
                KBUILD_BUILD_USER="Xiaomi" \
                KBUILD_BUILD_HOST="Official" \
                LOCALVERSION="-qgki-gbb70cde46897" \
-               Image
-
-          # 5. 如果 Image 成功了，再尝试编 dtbo (单独编，好排查问题)
-          # 小米 11 的 dtbo 通常在驱动目录下
-          make -j$(nproc --all) O=out ARCH=arm64 \
-               CC=clang \
-               HOSTCC=gcc \
-               LD=ld.lld \
-               CLANG_TRIPLE=aarch64-linux-gnu- \
-               CROSS_COMPILE=aarch64-linux-android- \
-               dtbs || echo "DTBS 编译跳过，可能源码不支持此目标"
+               Image dtbs
 
       - name: 6. 提取镜像 (全盘暴力搜索)
         run: |
