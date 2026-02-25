@@ -33,20 +33,30 @@ jobs:
           find -L drivers/kernelsu -type f -name "*.c" -exec sed -i 's/TWA_RESUME/true/g' {} + || true
           find -L drivers/kernelsu -type f -name "*.c" -exec sed -i 's/TWA_SIGNAL/true/g' {} + || true
           
-          # 2. 【新增】修复 5.4 内核 seccomp.filter_count 缺失报错
+          # 2. 【核心】修复 5.4 内核 seccomp.filter_count 缺失报错
           echo "[+] 正在屏蔽缺失的 seccomp.filter_count 引用..."
           find -L drivers/kernelsu -type f -name "app_profile.c" -exec sed -i 's/atomic_set(&.*seccomp.filter_count, 0);/\/\/ &/g' {} + || true
 
-          # 3. 【全新修复】解决 5.4 找不到 linux/pgtable.h 的致命错误
+          # 3. 【核心】解决 5.4 找不到 linux/pgtable.h 的致命错误
           echo "[+] 正在修正 pgtable 头文件路径..."
           find -L drivers/kernelsu -type f -name "sucompat.c" -exec sed -i 's/<linux\/pgtable\.h>/<asm\/pgtable\.h>/g' {} + || true
 
-          # 4. 锁定内核版本为 233 (草莓味震动身份证)
+          # 4. 【最新追加】屏蔽不兼容的 pkg_observer 功能 (针对 5.4 内核)
+          echo "[+] 正在移除不兼容的 fsnotify (pkg_observer)..."
+          if [ -d "KernelSU" ]; then
+             sed -i 's/pkg_observer.o//g' KernelSU/kernel/Makefile
+             sed -i 's/ksu_enable_pkg_observer();//g' KernelSU/kernel/core_hook.c
+          fi
+          # 兜底操作
+          sed -i 's/pkg_observer.o//g' drivers/kernelsu/Makefile || true
+          sed -i 's/ksu_enable_pkg_observer();//g' drivers/kernelsu/core_hook.c || true
+
+          # 5. 锁定内核版本为 233 (草莓味震动身份证)
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 233/' Makefile
           echo "echo \"\"" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
 
-          # 5. 彻底清理并合并配置
+          # 6. 彻底清理并合并配置
           sed -i '/CONFIG_LOCALVERSION/d' arch/arm64/configs/vendor/xiaomi_QGKI.config
           
           cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
