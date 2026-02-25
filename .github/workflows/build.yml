@@ -71,22 +71,38 @@ jobs:
                CROSS_COMPILE_ARM32=arm-linux-androideabi- \
                LD=ld.lld Image
 
-      - name: 6. 提取镜像 (全路径深度扫描)
+      - name: 6. 提取镜像 (全盘暴力搜索)
         run: |
           mkdir -p output
-          # 提取 Image
-          [ -f kernel/out/arch/arm64/boot/Image ] && cp kernel/out/arch/arm64/boot/Image output/
-          
-          # 提取 DTBO (修复震动)
-          echo "正在搜寻 dtbo..."
-          if [ -f kernel/out/arch/arm64/boot/dtbo.img ]; then
-            cp kernel/out/arch/arm64/boot/dtbo.img output/
-          else
-            # 这里的路径包含了常见的 vendor 分区路径，尝试捞出 star 专用的
-            find kernel/out/arch/arm64/boot/dts/ -name "*star*.dtbo" -exec cp {} output/dtbo.img \;
+          # 1. 提取内核本体 (已经确定编译成功了)
+          if [ -f kernel/out/arch/arm64/boot/Image ]; then
+            cp kernel/out/arch/arm64/boot/Image output/
+            echo "✅ 成功找到内核 Image"
           fi
           
-          # 检查结果
+          # 2. 暴力搜索 dtbo 文件
+          echo "🔍 正在全盘搜寻 dtbo 文件..."
+          
+          # 直接从 out 根目录开始搜，不管它在哪个文件夹
+          # 我们找名字包含 star 且以 .dtbo 结尾的文件
+          DTBO_PATH=$(find kernel/out -name "*star*.dtbo" | head -n 1)
+          
+          # 如果没找到带 star 的，就搜任何包含 lahaina 的 (小米11是 lahaina 平台)
+          if [ -z "$DTBO_PATH" ]; then
+            DTBO_PATH=$(find kernel/out -name "*lahaina*.dtbo" | head -n 1)
+          fi
+
+          if [ ! -z "$DTBO_PATH" ]; then
+            echo "🎯 成功定位 DTBO 文件: $DTBO_PATH"
+            cp "$DTBO_PATH" output/dtbo.img
+          else
+            echo "❌ 警告：仍未找到 .dtbo 文件！"
+            echo "目前已生成的文件列表如下(调试用):"
+            find kernel/out -name "*.dtbo" || echo "确实没有任何 .dtbo 生成"
+          fi
+
+          # 3. 检查并展示最终产物
+          echo "📦 最终产物列表:"
           ls -lh output/
 
       - name: 7. 上传
