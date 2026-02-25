@@ -18,28 +18,32 @@ jobs:
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android12-release gcc64
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android12-release gcc32
 
-      - name: 3. 正确集成 SukiSU (修正 404 错误)
+      - name: 3. 集成 SukiSU (修正 404，本地克隆版)
         run: |
           cd kernel
-          # 注意：仓库名是 Suki，不是 SukiSU
-          curl -LSs "https://raw.githubusercontent.com/mizunosekai/Suki/main/kernel/setup.sh" | bash -s main
+          # 克隆 SukiSU 官方源码仓库
+          git clone https://github.com/mizunosekai/Suki.git ../Suki-src
+          # 执行本地集成脚本，这次绝不会有 404
+          cp -r ../Suki-src/kernel/* ./
+          echo "SukiSU 源码集成完成"
 
-      - name: 4. 强制内核身份证 & 震动环境修复
+      - name: 4. 强制内核身份证 & 震动修复 (环境锁定)
         run: |
           cd kernel
-          # 1. 强制将内核源码级别降回 233，骗过官方震动驱动
+          # 1. 强行将源码版本降回 233
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 233/' Makefile
           
-          # 2. 彻底抹除所有版本后缀（+号、脏标记、Git后缀）
+          # 2. 彻底抹除所有脚本自动生成的后缀（防止出现 + 号）
           echo "echo \"\"" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
 
-          # 3. 合并小米官方配置 (确保包含 star 专用的震动配置)
+          # 3. 合并官方配置
           cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
               arch/arm64/configs/vendor/xiaomi_QGKI.config \
               arch/arm64/configs/vendor/star_QGKI.config > arch/arm64/configs/star_merged_defconfig
 
-          # 4. 锁死 SukiSU 配置与官方版本号
+          # 4. 注入 SukiSU 必要宏和官方身份证
+          # 注意：SukiSU 开启宏通常是 CONFIG_SUKI
           {
             echo "CONFIG_LOCALVERSION=\"-qgki-gbb70cde46897\""
             echo "CONFIG_LOCALVERSION_AUTO=n"
@@ -48,21 +52,21 @@ jobs:
             echo "CONFIG_STACKPROTECTOR_STRONG=n"
           } >> arch/arm64/configs/star_merged_defconfig
 
-      - name: 5. 编译内核与设备树 (锁死变量)
+      - name: 5. 编译内核与设备树 (锁死全局变量)
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
           make O=out ARCH=arm64 star_merged_defconfig
           
-          # 双重检查：确保 CONFIG_SUKI 确实存在
+          # 确认 SukiSU 宏是否生效
           if ! grep -q "CONFIG_SUKI=y" out/.config; then
             echo "CONFIG_SUKI=y" >> out/.config
           fi
           
           make O=out ARCH=arm64 olddefconfig
 
-          # 编译内核本体和 DTBO (震动关键)
+          # 编译时强制传递 LOCALVERSION，不给编译器任何“加戏”空间
           make -j$(nproc --all) O=out ARCH=arm64 \
                CC=clang HOSTCC=gcc \
                KCFLAGS="-fno-stack-protector" \
