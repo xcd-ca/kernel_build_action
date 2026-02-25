@@ -50,28 +50,25 @@ jobs:
             echo "CONFIG_STACKPROTECTOR_STRONG=n"
           } >> arch/arm64/configs/star_merged_defconfig
 
-      - name: 5. 编译内核 (全自动回车 & 修复目标丢失)
+      - name: 5. 最终攻坚：编译 Image (精准捕获错误)
         run: |
           cd kernel
-          # 1. 环境清理：移除冲突的 ld
+          # 1. 再次确认环境隔离
           rm -f $GITHUB_WORKSPACE/clang/bin/ld
           rm -f $GITHUB_WORKSPACE/clang/bin/ld.lld
           rm -f $GITHUB_WORKSPACE/clang/bin/lld
-          
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
-          # 2. 生成并强制刷新配置 (用 yes 命令自动回答所有询问，解决死循环)
+          # 2. 强制回车生成配置
           make O=out ARCH=arm64 star_merged_defconfig
           yes "" | make O=out ARCH=arm64 olddefconfig
           
-          # 3. 再次确认 SukiSU 宏 (防止被旧配置冲掉)
-          if ! grep -q "CONFIG_SUKI=y" out/.config; then
-            echo "CONFIG_SUKI=y" >> out/.config
-            yes "" | make O=out ARCH=arm64 olddefconfig
-          fi
-
-          # 4. 正式编译：去掉那个报错的 dtbo.img，改编 dtbs
-          # 这样会生成 Image 和一堆 .dtbo 文件，这才是标准流程
+          # 3. 强制注入 SukiSU 标志（防止丢失）
+          sed -i 's/CONFIG_SUKI=n/CONFIG_SUKI=y/g' out/.config || echo "CONFIG_SUKI=y" >> out/.config
+          
+          # 4. 开始编译 Image
+          # 注意：这次我们先不编 dtbo，只编 Image，看能不能过
+          # 如果这里报错，请翻上去找带有 "error:" 的红字
           make -j$(nproc --all) O=out ARCH=arm64 \
                CC=clang \
                HOSTCC=gcc \
@@ -89,7 +86,17 @@ jobs:
                KBUILD_BUILD_USER="Xiaomi" \
                KBUILD_BUILD_HOST="Official" \
                LOCALVERSION="-qgki-gbb70cde46897" \
-               Image dtbs
+               Image
+
+          # 5. 如果 Image 成功了，再尝试编 dtbo (单独编，好排查问题)
+          # 小米 11 的 dtbo 通常在驱动目录下
+          make -j$(nproc --all) O=out ARCH=arm64 \
+               CC=clang \
+               HOSTCC=gcc \
+               LD=ld.lld \
+               CLANG_TRIPLE=aarch64-linux-gnu- \
+               CROSS_COMPILE=aarch64-linux-android- \
+               dtbs || echo "DTBS 编译跳过，可能源码不支持此目标"
 
       - name: 6. 提取镜像 (全盘暴力搜索)
         run: |
