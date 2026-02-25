@@ -25,21 +25,28 @@ jobs:
           curl -LSs -f "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash
           echo "✅ SukiSU 代码集成成功！"
 
-      - name: 4. 外科手术修复 & 身份证锁定 (找回草莓味)
+      - name: 4. 核心修复：强制注入补丁 & 锁定震动身份证
         run: |
           cd kernel
-          # 1. 【核心修复】解决 TWA_RESUME 报错，5.4 内核需替换为 TWA_SIGNAL
-          # 这步不修，编译永远过不去
-          find drivers/kernelsu -type f -name "*.c" -exec sed -i 's/TWA_RESUME/TWA_SIGNAL/g' {} +
-          
-          # 2. 强行锁定内核版本为 233
+          # 1. 【核心】修复 KernelSU 在 5.4 内核上的代码错误
+          # 必须直接指向 KernelSU 目录，或者使用 -L 参数跟随软链接
+          echo "[+] 正在修复 TWA_RESUME 兼容性..."
+          if [ -d "KernelSU" ]; then
+            find KernelSU -type f -name "*.c" -exec sed -i 's/TWA_RESUME/TWA_SIGNAL/g' {} +
+            find KernelSU -type f -name "*.h" -exec sed -i 's/TWA_RESUME/TWA_SIGNAL/g' {} +
+          fi
+          # 兜底：对 drivers/kernelsu 路径再做一次（跟随软链接）
+          find -L drivers/kernelsu -type f -name "*.c" -exec sed -i 's/TWA_RESUME/TWA_SIGNAL/g' {} + || true
+
+          # 2. 强制修正版本号（确保没有 + 号，找回草莓味震动）
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 233/' Makefile
-          
-          # 3. 彻底抹除版本后缀（防止 + 号破坏震动身份证）
           echo "echo \"\"" > scripts/setlocalversion
           chmod +x scripts/setlocalversion
 
-          # 4. 强制注入配置
+          # 3. 彻底清理并重新生成 star_merged_defconfig
+          # 先删除旧的 LOCALVERSION 防止重复冲突
+          sed -i '/CONFIG_LOCALVERSION/d' arch/arm64/configs/vendor/xiaomi_QGKI.config
+          
           cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
               arch/arm64/configs/vendor/xiaomi_QGKI.config \
               arch/arm64/configs/vendor/star_QGKI.config > arch/arm64/configs/star_merged_defconfig
@@ -52,23 +59,23 @@ jobs:
             echo "CONFIG_STACKPROTECTOR_STRONG=n"
           } >> arch/arm64/configs/star_merged_defconfig
 
-      - name: 5. 纯净编译 (Image + DTBS)
+      - name: 5. 纯净编译 (全力冲刺)
         run: |
           cd kernel
-          # 环境清理
+          # 再次清理环境隔离
           rm -f $GITHUB_WORKSPACE/clang/bin/ld*
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
-          # 强制回车刷新配置
+          # 刷新配置
           make O=out ARCH=arm64 star_merged_defconfig
           yes "" | make O=out ARCH=arm64 olddefconfig
           
-          # 正式编译
+          # 正式编译 Image 和 dtbs
           make -j$(nproc --all) O=out ARCH=arm64 \
                CC=clang HOSTCC=gcc HOSTCXX=g++ \
                LD=ld.lld AR=llvm-ar NM=llvm-nm \
                OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-               KCFLAGS="-fno-stack-protector" \
+               KCFLAGS="-Wno-implicit-function-declaration -Wno-strict-prototypes -fno-stack-protector" \
                CLANG_TRIPLE=aarch64-linux-gnu- \
                CROSS_COMPILE=aarch64-linux-android- \
                CROSS_COMPILE_ARM32=arm-linux-androideabi- \
