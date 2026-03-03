@@ -4,7 +4,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: 1. 安装基础依赖
         run: |
@@ -61,32 +61,33 @@ jobs:
         run: |
           cd kernel
           
-          # 建议 2: 核心修复 - 移除工具链中过旧的 Linker 软链接
-          # 这样可以防止它干扰 Host Tools 的编译，同时不影响内核使用的 ld.lld
-          rm -f $GITHUB_WORKSPACE/clang/bin/ld $GITHUB_WORKSPACE/clang/bin/ld.gold $GITHUB_WORKSPACE/clang/bin/ld.bfd
+          # 【核心修复】由于 Ubuntu 24.04 的库较新，旧版 Proton Clang 的 ld 会报错
+          # 我们直接删掉工具链里的 ld 软链接，让它回退使用系统的 ld.lld 或 ld
+          find $GITHUB_WORKSPACE/clang/bin -name "ld.gold" -delete
+          find $GITHUB_WORKSPACE/clang/bin -name "ld.bfd" -delete
+          find $GITHUB_WORKSPACE/clang/bin -name "ld" -delete
           
           # 设置环境变量
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
-          # 检查版本信息是否准确（这决定了震动是否正常）
-          # 请确保 SUBLEVEL 和 CONFIG_LOCALVERSION 组合后与你手机 cat /proc/version 的结果完全一致
-          # 示例：5.4.233-qgki-gbb70cde46897
+          # 确保版本号和震动补丁逻辑（保持你之前的设置）
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 233/' Makefile
           echo "exit 0" > scripts/setlocalversion
-          export CONFIG_LOCALVERSION="-qgki-gbb70cde46897"
           
           # 生成配置
           make O=out ARCH=arm64 star_merged_defconfig
           
-          # 开始编译
+          # 开始编译 (显式指定 LD=ld.lld)
           make -j$(nproc --all) O=out ARCH=arm64 \
                CC=clang HOSTCC=gcc HOSTCXX=g++ \
                LD=ld.lld AR=llvm-ar NM=llvm-nm \
                OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
                KCFLAGS="-Wno-implicit-function-declaration -fno-stack-protector" \
-               LOCALVERSION=$CONFIG_LOCALVERSION \
-               KBUILD_BUILD_USER="tanz3" \
-               KBUILD_BUILD_HOST="github-action"
+               CLANG_TRIPLE=aarch64-linux-gnu- \
+               CROSS_COMPILE=aarch64-linux-android- \
+               CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+               LOCALVERSION="-qgki-gbb70cde46897" \
+               Image dtbs
 
       - name: 6. 提取镜像
         run: |
