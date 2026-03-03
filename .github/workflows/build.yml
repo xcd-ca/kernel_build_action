@@ -18,72 +18,54 @@ jobs:
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android12-release gcc64
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android12-release gcc32
 
-      - name: 3. 集成 SukiSU (修复分支参数)
+      - name: 3. 集成 SukiSU
         run: |
           cd kernel
-          # 不再传递 nongki，直接运行脚本
           curl -LSs -f "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash
-          echo "✅ SukiSU 代码集成成功！"
 
-      - name: 4. 核心修复：降维打击补丁 & 锁定震动身份证
+      - name: 4. 深度修复：震动校准匹配 & KSU 兼容性
         run: |
           cd kernel
-          # 1. 【核心】5.4 内核 task_work_add 兼容性修复
-          echo "[+] 正在修复 TWA_RESUME -> true..."
+          # --- 1. KSU 相关修复 ---
           find -L drivers/kernelsu -type f -name "*.c" -exec sed -i 's/TWA_RESUME/true/g' {} + || true
           find -L drivers/kernelsu -type f -name "*.c" -exec sed -i 's/TWA_SIGNAL/true/g' {} + || true
-          
-          # 2. 【核心】修复 5.4 内核 seccomp.filter_count 缺失报错
-          echo "[+] 正在屏蔽缺失的 seccomp.filter_count 引用..."
           find -L drivers/kernelsu -type f -name "app_profile.c" -exec sed -i 's/atomic_set(&.*seccomp.filter_count, 0);/\/\/ &/g' {} + || true
-
-          # 3. 【核心】解决 5.4 找不到 linux/pgtable.h 的致命错误
-          echo "[+] 正在修正 pgtable 头文件路径..."
           find -L drivers/kernelsu -type f -name "sucompat.c" -exec sed -i 's/<linux\/pgtable\.h>/<asm\/pgtable\.h>/g' {} + || true
-
-          # 4. 【最新追加】屏蔽不兼容的 pkg_observer 功能 (针对 5.4 内核)
-          echo "[+] 正在移除不兼容的 fsnotify (pkg_observer)..."
-          if [ -d "KernelSU" ]; then
-             sed -i 's/pkg_observer.o//g' KernelSU/kernel/Makefile
-             sed -i 's/ksu_enable_pkg_observer();//g' KernelSU/kernel/core_hook.c
-          fi
-          # 兜底操作
-          sed -i 's/pkg_observer.o//g' drivers/kernelsu/Makefile || true
-          sed -i 's/ksu_enable_pkg_observer();//g' drivers/kernelsu/core_hook.c || true
-
-          # 5. 锁定内核版本为 233 (草莓味震动身份证)
-          sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 233/' Makefile
-          echo "echo \"\"" > scripts/setlocalversion
-          chmod +x scripts/setlocalversion
-
-          # 6. 彻底清理并合并配置
-          sed -i '/CONFIG_LOCALVERSION/d' arch/arm64/configs/vendor/xiaomi_QGKI.config
           
+          # --- 2. 【核心】修复震动问题的版本锁定 ---
+          # 强制 SUBLEVEL 为 233
+          sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 233/' Makefile
+          # 彻底禁用 scripts/setlocalversion 自动添加 + 号后缀
+          echo "exit 0" > scripts/setlocalversion
+          chmod +x scripts/setlocalversion
+          
+          # --- 3. 配置合并与马达驱动锁定 ---
           cat arch/arm64/configs/vendor/lahaina-qgki_defconfig \
               arch/arm64/configs/vendor/xiaomi_QGKI.config \
               arch/arm64/configs/vendor/star_QGKI.config > arch/arm64/configs/star_merged_defconfig
           
           {
             echo "CONFIG_SUKI=y"
+            # 这里的版本号必须与你原厂内核完全一致
             echo "CONFIG_LOCALVERSION=\"-qgki-gbb70cde46897\""
             echo "CONFIG_LOCALVERSION_AUTO=n"
+            # 确保马达校准逻辑相关的驱动开启
+            echo "CONFIG_INPUT_XIAOMI_VIBRATOR=y"
+            echo "CONFIG_INPUT_AW8697_HAPTIC=y"
+            # 解决 Linker 可能的报错
             echo "CONFIG_STACKPROTECTOR=n"
             echo "CONFIG_STACKPROTECTOR_STRONG=n"
           } >> arch/arm64/configs/star_merged_defconfig
 
-      - name: 5. 纯净编译 (全力冲刺)
+      - name: 5. 纯净编译 (注入版本参数)
         run: |
           cd kernel
-          # 准备环境
-          rm -f $GITHUB_WORKSPACE/clang/bin/ld*
+          # 设置环境变量，强制使用 LLVM 工具链防止 Linker 报错
           export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc64/bin:$GITHUB_WORKSPACE/gcc32/bin:$PATH
           
-          # 生成配置
           make O=out ARCH=arm64 star_merged_defconfig
-          yes "" | make O=out ARCH=arm64 olddefconfig
           
-          # 正式编译
-          # 加入额外的 CFLAGS 屏蔽无关警告，专注编译
+          # 编译时再次通过命令行注入 LOCALVERSION，这是最稳妥的办法
           make -j$(nproc --all) O=out ARCH=arm64 \
                CC=clang HOSTCC=gcc HOSTCXX=g++ \
                LD=ld.lld AR=llvm-ar NM=llvm-nm \
@@ -92,46 +74,23 @@ jobs:
                CLANG_TRIPLE=aarch64-linux-gnu- \
                CROSS_COMPILE=aarch64-linux-android- \
                CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+               LOCALVERSION="-qgki-gbb70cde46897" \
                KBUILD_BUILD_USER="Xiaomi" \
                KBUILD_BUILD_HOST="Official" \
-               LOCALVERSION="-qgki-gbb70cde46897" \
                Image dtbs
 
-      - name: 6. 提取镜像 (全盘暴力搜索)
+      - name: 6. 提取镜像
         run: |
           mkdir -p output
-          # 1. 提取内核本体 (已经确定编译成功了)
-          if [ -f kernel/out/arch/arm64/boot/Image ]; then
-            cp kernel/out/arch/arm64/boot/Image output/
-            echo "✅ 成功找到内核 Image"
-          fi
-          
-          # 2. 暴力搜索 dtbo 文件
-          echo "🔍 正在全盘搜寻 dtbo 文件..."
-          
-          # 直接从 out 根目录开始搜，不管它在哪个文件夹
-          # 我们找名字包含 star 且以 .dtbo 结尾的文件
+          [ -f kernel/out/arch/arm64/boot/Image ] && cp kernel/out/arch/arm64/boot/Image output/
           DTBO_PATH=$(find kernel/out -name "*star*.dtbo" | head -n 1)
-          
-          # 如果没找到带 star 的，就搜任何包含 lahaina 的 (小米11是 lahaina 平台)
           if [ -z "$DTBO_PATH" ]; then
             DTBO_PATH=$(find kernel/out -name "*lahaina*.dtbo" | head -n 1)
           fi
-
-          if [ ! -z "$DTBO_PATH" ]; then
-            echo "🎯 成功定位 DTBO 文件: $DTBO_PATH"
-            cp "$DTBO_PATH" output/dtbo.img
-          else
-            echo "❌ 警告：仍未找到 .dtbo 文件！"
-            echo "目前已生成的文件列表如下(调试用):"
-            find kernel/out -name "*.dtbo" || echo "确实没有任何 .dtbo 生成"
-          fi
-
-          # 3. 检查并展示最终产物
-          echo "📦 最终产物列表:"
+          [ ! -z "$DTBO_PATH" ] && cp "$DTBO_PATH" output/dtbo.img
           ls -lh output/
 
-      - name: 7. 上传
+      - name: 7. 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: Mi11-Star-VibeFix-Images
